@@ -1,5 +1,5 @@
 ---
-- name: Deploy Kubernetes Cluster
+- name: Installing Required Packages [Master/Worker Node]
   hosts: all
   become: yes
   tasks:
@@ -26,11 +26,11 @@
     - name: Update apt repositories and Install Kubernetes components
       apt:
         update_cache: yes
-      name:
-        - kubelet
-        - kubeadm
-        - kubectl
-        - docker.io
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+          - docker.io
         state: present
 
     - name: Enable and start kubelet service
@@ -57,11 +57,15 @@
       apt:
         deb: /tmp/cri-dockerd.deb
 
+- name: Setting-up [Master Node]
+  hosts: master
+  become: yes
+  tasks:
     - name: Pull Kubernetes container images
       command: kubeadm config images pull --cri-socket unix:///var/run/cri-dockerd.sock
 
     - name: Initialize Kubernetes cluster
-      shell: sudo kubeadm init --apiserver-advertise-address $(hostname -i) --pod-network-cidr 10.244.0.0/16 --cri-socket unix:///var/run/cri-dockerd.sock --ignore-preflight-errors=Mem --ignore-preflight-errors=NumCPU
+      shell: kubeadm init --apiserver-advertise-address $(hostname -i) --pod-network-cidr 10.244.0.0/16 --cri-socket unix:///var/run/cri-dockerd.sock --ignore-preflight-errors=Mem --ignore-preflight-errors=NumCPU
 
     - name: Ensure .kube directory exists
       file:
@@ -80,3 +84,21 @@
 
     - name: Install Calico network plugin
       command: kubectl apply -f https://reweave.azurewebsites.net/k8s/v1.29/net.yaml
+      ignore_errors: yes
+
+    - name: Get the join command
+      shell: kubeadm token create --print-join-command
+      register: join_command
+
+    - name: Add join command to all hosts
+      add_host:
+        name: "{{ item }}"
+        kubeadm_join_command: "{{ join_command.stdout }}"
+      with_items: "{{ groups['all'] }}"
+
+- name: Joining Worker Node to Kubernetes Cluster
+  hosts: worker
+  become: yes
+  tasks:
+    - name: Join the worker node to the Kubernetes cluster
+      shell: "{{ hostvars[inventory_hostname]['kubeadm_join_command'] }} --cri-socket unix:///var/run/cri-dockerd.sock"
