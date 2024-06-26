@@ -1,0 +1,82 @@
+---
+- name: Deploy Kubernetes Cluster
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install prerequisite packages
+      apt:
+        update_cache: yes
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+
+    - name: Add Kubernetes apt repository key
+      shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Add Kubernetes apt repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+        state: present
+
+    - name: Update apt repositories and Install Kubernetes components
+      apt:
+        update_cache: yes
+      name:
+        - kubelet
+        - kubeadm
+        - kubectl
+        - docker.io
+        state: present
+
+    - name: Enable and start kubelet service
+      systemd:
+        name: kubelet
+        enabled: yes
+        state: started
+
+    - name: Enable and start docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Disable swap
+      command: swapoff -a
+
+    - name: Download and install cri-dockerd
+      get_url:
+        url: https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.13/cri-dockerd_0.3.13.3-0.ubuntu-jammy_amd64.deb
+        dest: /tmp/cri-dockerd.deb
+
+    - name: Install cri-dockerd
+      apt:
+        deb: /tmp/cri-dockerd.deb
+
+    - name: Pull Kubernetes container images
+      command: kubeadm config images pull --cri-socket unix:///var/run/cri-dockerd.sock
+
+    - name: Initialize Kubernetes cluster
+      shell: sudo kubeadm init --apiserver-advertise-address $(hostname -i) --pod-network-cidr 10.244.0.0/16 --cri-socket unix:///var/run/cri-dockerd.sock --ignore-preflight-errors=Mem --ignore-preflight-errors=NumCPU
+
+    - name: Ensure .kube directory exists
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        mode: '0755'
+
+    - name: Copy admin.conf to kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Install Calico network plugin
+      command: kubectl apply -f https://reweave.azurewebsites.net/k8s/v1.29/net.yaml
