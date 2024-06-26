@@ -66,6 +66,23 @@ cd kubernetes-cluster-setup
 ```
 ansible-playbook -i inventory.ini k8s-setup.yml
 ```
+
+### Setup /etc/ansible/ansible.cfg for fast performance
+```
+[ssh_connection]
+pipelining = True
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s
+
+[defaults]
+pipelining = True
+gathering = smart
+fact_caching = jsonfile
+fact_caching_connection = /tmp/ansible_cache
+fact_caching_timeout = 86400
+host_key_checking = False
+forks = 10
+```
+
 ### Playbook Details
 k8s-setup.yml
 
